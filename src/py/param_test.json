@@ -1,0 +1,38 @@
+{
+   "nutsData": {
+      "years": {
+         "2021": "'PT','ES','IE','UK','FR','IS','BE','LU','NL','CH','LI','DE','DK','IT','VA','MT','NO','SE','FI','EE','LV','LT','PL','CZ','SK','AT','SI','HU','HR','RO','BG','TR','EL','CY','MK','ME','AL'"
+      },
+      "scales": [
+         "01M"
+      ]
+   },
+   "geos": {
+      "MT": {
+         "name": "Malta",
+         "crs": {
+            "4326": {
+               "xmin": 14,
+               "ymin": 35.4,
+               "xmax": 15,
+               "ymax": 37
+            },
+            "3857": {
+               "xmin": 1573000,
+               "ymin": 4270000,
+               "xmax": 1632000,
+               "ymax": 4320000
+            },
+            "3035": {
+               "xmin": 4692000,
+               "ymin": 1420000,
+               "xmax": 4750000,
+               "ymax": 1466000
+            }
+         },
+         "scales": [
+            "01M"
+         ]
+      }
+   }
+}
