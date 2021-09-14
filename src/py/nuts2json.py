@@ -15,12 +15,13 @@ import os, ogr2ogr, subprocess, json, urllib.request
 
 
 # Set to True/False to show/hide debug messages
-debug = False
+debug = True
 
 # The Nuts2json version number
-version = "v1"
+version = "v2"
 
-# Download base data from GISCO download API
+
+# Download input data from GISCO download API
 def download():
    print("Download")
    Path("download/").mkdir(parents=True, exist_ok=True)
@@ -37,15 +38,15 @@ def download():
       if not Path(outfile).exists(): urllib.request.urlretrieve(baseURL + "nuts/geojson/NUTS_LB_"+year+"_4326.geojson", outfile)
 
       for scale in nutsData["scales"]:
-         if debug: print( year + " " + scale + " Download")
-
          for type in ["RG", "BN"]:
 
             # NUTS
+            if debug: print( year + " " + scale + " " + type + " NUTS Download")
             outfile = "download/NUTS_"+type+"_"+scale+"_"+year+"_4326.geojson"
             if not Path(outfile).exists(): urllib.request.urlretrieve(baseURL + "nuts/geojson/NUTS_"+type+"_"+scale+"_"+year+"_4326.geojson", outfile)
 
             # CNTR
+            if debug: print( year + " " + scale + " " + type + " CNTR Download")
             outfile = "download/CNTR_"+type+"_"+scale+"_"+year+"_4326.geojson"
             year_ = ("2020" if year=="2021" else year)
             if not Path(outfile).exists(): urllib.request.urlretrieve(baseURL + "countries/geojson/CNTR_"+type+"_"+scale+"_"+year_+"_4326.geojson", outfile)
@@ -67,7 +68,8 @@ def filterRenameDecomposeClean(doCleaning = True):
               "-nln", "lay", "-nlt", "MULTIPOLYGON",
               "download/CNTR_RG_"+scale+"_"+year+"_4326.geojson",
               "-a_srs", "EPSG:4326",
-              "-sql", "SELECT CNTR_ID as id,NAME_ENGL as na FROM CNTR_RG_" + scale + "_" + year + "_4326 WHERE CNTR_ID NOT IN (" + nutsData["years"][year] + ")"])
+              "-sql", "SELECT CNTR_ID as id,NAME_ENGL as na FROM CNTR_RG_" + scale + "_" + year + "_4326"])
+              #"-sql", "SELECT CNTR_ID as id,NAME_ENGL as na FROM CNTR_RG_" + scale + "_" + year + "_4326 WHERE CNTR_ID NOT IN (" + nutsData["years"][year] + ")"])
 
            if(doCleaning):
               if debug: print(year + " " + scale + " CNTR RG - clean with buffer(0)")
@@ -79,7 +81,8 @@ def filterRenameDecomposeClean(doCleaning = True):
               "-nln", "lay", "-nlt", "MULTILINESTRING",
               "download/CNTR_BN_"+scale+"_"+year+"_4326.geojson",
               "-a_srs", "EPSG:4326",
-              "-sql", "SELECT CNTR_BN_ID as id,CC_FLAG as cc,OTHR_FLAG as oth,COAS_FLAG as co FROM CNTR_BN_" + scale + "_" + year + "_4326 WHERE EU_FLAG='F' AND EFTA_FLAG='F'"])
+              "-sql", "SELECT CNTR_BN_ID as id,EU_FLAG as eu,EFTA_FLAG as efta,CC_FLAG as cc,OTHR_FLAG as oth,COAS_FLAG as co FROM CNTR_BN_" + scale + "_" + year + "_4326"])
+              #"-sql", "SELECT CNTR_BN_ID as id,CC_FLAG as cc,OTHR_FLAG as oth,COAS_FLAG as co FROM CNTR_BN_" + scale + "_" + year + "_4326 WHERE EU_FLAG='F' AND EFTA_FLAG='F'"])
 
            for level in ["0", "1", "2", "3"]:
 
@@ -236,8 +239,6 @@ def topoGeojson():
                     "cntrg=" + inpath + scale + "_CNTR_RG.geojson",
                     "cntbn=" + inpath + scale + "_CNTR_BN.geojson",
                     "gra=" + inpath + "graticule.geojson",
-                    #TODO remove if not EUR
-                    #("xk=" + "src/resources/xk/"+scale+"_"+year+".json") if(geo == "EUR") else "",
                     "-o", inpath + level + ".json"])
 
                   if debug: print(year + " " + geo + " " + crs + " " + scale + " " + level + " - simplify topojson")
@@ -269,8 +270,6 @@ def topoGeojson():
                  "cntrg=" + inpath + scale + "_CNTR_RG.geojson",
                  "cntbn=" + inpath + scale + "_CNTR_BN.geojson",
                  "gra=" + inpath + "graticule.geojson",
-                 #TODO remove if not EUR
-                 #("xk=" + "src/resources/xk/"+scale+"_"+year+".json") if(geo == "EUR") else "",
                  "-o", inpath + "all.json"])
 
                if debug: print(year + " " + geo + " " + crs + " " + scale + " - simplify topojson")
