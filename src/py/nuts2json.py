@@ -26,7 +26,9 @@ def download_from_url(url, outfile, timeout=50):
    try:
       # Open the URL with a specified timeout
       with urllib.request.urlopen(url, timeout=timeout) as response:
-         with open(outfile, 'wb') as out_file: out_file.write(response.read())
+         with open(outfile, 'wb') as out_file:
+            out_file.write(response.read())
+            print("Done !")
    except urllib.error.HTTPError as e:
       print(f"HTTP Error: {e.code} - {e.reason}")
    except urllib.error.URLError as e:
@@ -404,9 +406,9 @@ with open("pub/" + version + "/data.json", "w") as fp:
     json.dump(geos, fp, indent=3)
 
 # 1
-#download()
+download()
 # 2
-filterRenameDecomposeClean(False)
+#filterRenameDecomposeClean(False)
 # 3
 #coarseClipping()
 # 4
