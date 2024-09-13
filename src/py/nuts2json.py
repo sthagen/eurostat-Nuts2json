@@ -1,10 +1,10 @@
-import os
 from pathlib import Path
-import subprocess, json, urllib.request, reduceGeoJSON #, ogr2ogr
+import subprocess, json, reduceGeoJSON #, urllib.request
+import requests
 import geopandas as gpd
 import pandas as pd
-from shapely.ops import unary_union
 from shapely.geometry import box, MultiPolygon, Polygon, MultiLineString, LineString
+import time
 
 ################
 # Target structure
@@ -14,8 +14,8 @@ from shapely.geometry import box, MultiPolygon, Polygon, MultiLineString, LineSt
 # pts:       YEAR/GEO/PROJECTION/nutspt_<NUTS_LEVEL>.json
 #
 # Requirements:
-# - GDAL (ogr2ogr and ogrinfo)
-# - topojson (geo2topo, toposimplify, topo2geo). Install with nodeJS (npm install -g topojson)
+# - python dependencies: see imports above
+# - topojson 2.0 (geo2topo, toposimplify, topo2geo). Install globally with nodeJS (npm install -g topojson)
 ################
 
 
@@ -26,7 +26,16 @@ debug = True
 version = "v2"
 
 
+# save data from url to file
 def download_from_url(url, outfile, timeout=50):
+   if Path(outfile).exists(): return
+   if debug: print(url)
+
+   url = url + "?_=" + str(int(time.time()))
+   response = requests.get(url, headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
+   with open(outfile, "wb") as file:
+       file.write(response.content)
+   '''
    try:
       # Open the URL with a specified timeout
       with urllib.request.urlopen(url, timeout=timeout) as response:
@@ -39,6 +48,7 @@ def download_from_url(url, outfile, timeout=50):
       print(f"URL Error: {e.reason}")
    except Exception as e:
       print(f"An error occurred: {e}")
+    '''
 
 
 
@@ -51,37 +61,33 @@ def download(timeout=30000):
    for year in nutsData["years"]:
 
       #AT
-      outfile = "download/NUTS_AT_"+year+".csv"
-      url = baseURL + "nuts/csv/NUTS_AT_"+year+".csv"
-      if debug: print( year + " AT Download", url)
-      if not Path(outfile).exists(): download_from_url(url, outfile, timeout)
+      if debug: print(year, "AT Download")
+      file = "NUTS_AT_"+year+".csv"
+      download_from_url(baseURL + "nuts/csv/" + file, "download/"+file, timeout)
 
       # NUTS LB
-      outfile = "download/NUTS_LB_"+year+"_4326.gpkg"
-      url = baseURL + "nuts/gpkg/NUTS_LB_"+year+"_4326.gpkg"
-      if debug: print( year + " LB Download", url)
-      if not Path(outfile).exists(): download_from_url(url, outfile, timeout)
+      if debug: print(year, "LB Download")
+      file = "NUTS_LB_"+year+"_4326.gpkg"
+      download_from_url(baseURL + "nuts/gpkg/" + file, "download/"+file, timeout)
 
 
       for scale in nutsData["scales"]:
          for type in ["RG", "BN"]:
 
             # NUTS
-            outfile = "download/NUTS_"+type+"_"+scale+"_"+year+"_4326.gpkg"
-            url = baseURL + "nuts/gpkg/NUTS_"+type+"_"+scale+"_"+year+"_4326.gpkg"
-            if debug: print( year + " " + scale + " " + type + " NUTS Download", url)
-            if not Path(outfile).exists(): download_from_url(url, outfile, timeout)
+            if debug: print(year, scale, type, "NUTS Download")
+            file = "NUTS_"+type+"_"+scale+"_"+year+"_4326.gpkg"
+            download_from_url(baseURL + "nuts/gpkg/" + file, "download/"+file, timeout)
 
             # CNTR
-            outfile = "download/CNTR_"+type+"_"+scale+"_"+year+"_4326.gpkg"
+            if debug: print(year, scale, type, "CNTR Download")
+            file = "CNTR_"+type+"_"+scale+"_"+year+"_4326.gpkg"
             year_ = ("2020" if year=="2021" else year)
-            url = baseURL + "countries/gpkg/CNTR_"+type+"_"+scale+"_"+year_+"_4326.gpkg"
-            if debug: print( year + " " + scale + " " + type + " CNTR Download", url)
-            if not Path(outfile).exists(): download_from_url(url, outfile, timeout)
+            download_from_url(baseURL + "countries/gpkg/CNTR_"+type+"_"+scale+"_"+year_+"_4326.gpkg", "download/"+file, timeout)
 
 
 
-
+# Prepare data: select attributes, rename them, decompose files by level
 def filterRenameDecomposeClean(doCleaning=True):
     print("filterRenameDecompose")
     Path("tmp/").mkdir(parents=True, exist_ok=True)
@@ -205,60 +211,57 @@ def coarseClipping():
 
 
 
-# Clip, reproject and convert as geojson
-def reprojectClipGeojson(doCleaning = True):
-   print("reprojectClipGeojson")
+# produce input geojson files, reprojected and clipped
+def reprojectClipGeojson(doCleaning=True):
+    print("reprojectClipGeojson")
 
-   for year in nutsData["years"]:
-      for geo in geos:
-         for crs in geos[geo]["crs"]:
-            outpath = "tmp/"+year+"/"+geo+"/"+crs+"/"
-            Path(outpath).mkdir(parents=True, exist_ok=True)
-            extent = geos[geo]["crs"][crs]
+    for year in nutsData["years"]:
+        for geo in geos:
+            for crs in geos[geo]["crs"]:
+                # Create output directories
+                outpath = f"tmp/{year}/{geo}/{crs}/"
+                Path(outpath).mkdir(parents=True, exist_ok=True)
+                extent = geos[geo]["crs"][crs]
 
-            if debug: print(year + " " + geo + " " + crs + " - reproject + clip + geojson graticule")
-            ogr2ogr.main(["-overwrite","-f","GeoJSON",
-              outpath + "graticule.geojson",
-              "tmp/" + year + "_" + geo + "_graticule.gpkg",
-              "-a_srs" if(crs=="4326") else "-t_srs", "EPSG:"+crs,
-              #"-makevalid",
-              "-clipdst", str(extent["xmin"]), str(extent["ymin"]), str(extent["xmax"]), str(extent["ymax"])
-              ])
+                # Define the bounding box for clipping
+                bbox = box(extent["xmin"], extent["ymin"], extent["xmax"], extent["ymax"])
+                bbox_gdf = gpd.GeoDataFrame({"geometry": [bbox]}, crs="EPSG:"+crs)
 
-            for type in [ "RG", "BN" ]:
-               for scale in geos[geo]["scales"]:
+                # Graticule processing
+                if debug: print(f"{year} {geo} {crs} - reproject + clip + geojson graticule")
+                gdf_graticule = gpd.read_file(f"tmp/{year}_{geo}_graticule.gpkg")
+                if crs != "4326": gdf_graticule = gdf_graticule.to_crs(epsg=int(crs))
 
-                  if debug: print(year + " " + geo + " " + crs + " " + scale + " " + type + " - reproject CNTR")
-                  ogr2ogr.main(["-overwrite","-f","GPKG",
-                    outpath + scale + "_CNTR_" + type + "_reproject.gpkg",
-                    "tmp/" + year + "_" + geo + "_" + scale + "_CNTR_" + type + ".gpkg",
-                    #"-makevalid",
-                    "-nln", "lay",
-                    "-a_srs" if(crs=="4326") else "-t_srs", "EPSG:"+crs
-                    ])
+                gdf_graticule_clipped = gpd.clip(gdf_graticule, bbox_gdf)
+                gdf_graticule_clipped.to_file(f"{outpath}graticule.geojson", driver="GeoJSON")
 
-                  if(doCleaning and type=="RG"):
-                     if debug: print(year + " " + geo + " " + crs + " " + scale + " " + type + " - clean CNTR")
-                     subprocess.run(["ogrinfo", "-dialect", "indirect_sqlite", "-sql", "update lay set geom=ST_Multi(ST_Buffer(geom,0))", outpath + scale + "_CNTR_" + type + "_reproject.gpkg"])
+                for type in ["RG", "BN"]:
+                    for scale in geos[geo]["scales"]:
+                        # Reproject and save CNTR layers
+                        if debug: print(f"{year} {geo} {crs} {scale} {type} - reproject CNTR")
+                        gdf_cntr = gpd.read_file(f"tmp/{year}_{geo}_{scale}_CNTR_{type}.gpkg")
+                        gdf_cntr_reprojected = gdf_cntr.to_crs(epsg=int(crs))
+                        gdf_cntr_reprojected.to_file(f"{outpath}{scale}_CNTR_{type}_reproject.gpkg", driver="GPKG")
 
-                  if debug: print(year + " " + geo + " " + crs + " " + scale + " " + type + " - clip + geojson CNTR")
-                  ogr2ogr.main(["-overwrite","-f","GeoJSON",
-                    outpath + scale + "_CNTR_" + type + ".geojson",
-                    outpath + scale + "_CNTR_" + type + "_reproject.gpkg",
-                    #"-makevalid",
-                    "-clipdst", str(extent["xmin"]), str(extent["ymin"]), str(extent["xmax"]), str(extent["ymax"])
-                    ])
+                        # Optionally clean with buffer(0) for RG type
+                        if doCleaning and type == "RG":
+                            if debug: print(f"{year} {geo} {crs} {scale} {type} - clean CNTR")
+                            gdf_cntr_reprojected['geometry'] = gdf_cntr_reprojected.buffer(0)
+                            gdf_cntr_reprojected.to_file(f"{outpath}{scale}_CNTR_{type}_reproject.gpkg", driver="GPKG")
 
-                  for level in ["0", "1", "2", "3"]:
+                        # Clip and save as GeoJSON
+                        if debug: print(f"{year} {geo} {crs} {scale} {type} - clip + geojson CNTR")
+                        gdf_cntr_clipped = gpd.clip(gdf_cntr_reprojected, bbox_gdf)
+                        gdf_cntr_clipped.to_file(f"{outpath}{scale}_CNTR_{type}.geojson", driver="GeoJSON")
 
-                     if debug: print(year + " " + geo + " " + crs + " " + scale + " " + type + " " + level + " - reproject + clip + geojson NUTS")
-                     ogr2ogr.main(["-overwrite","-f","GeoJSON",
-                       outpath + scale + "_" + level + "_NUTS_" + type + ".geojson",
-                       "tmp/" + year + "_" + geo + "_" + scale + "_" + level + "_NUTS_" + type + ".gpkg",
-                       "-a_srs" if(crs=="4326") else "-t_srs", "EPSG:"+crs,
-                       #"-makevalid",
-                       "-clipdst", str(extent["xmin"]), str(extent["ymin"]), str(extent["xmax"]), str(extent["ymax"])
-                       ])
+                        for level in ["0", "1", "2", "3"]:
+                            # Reproject, clip, and save NUTS layers as GeoJSON
+                            if debug: print(f"{year} {geo} {crs} {scale} {type} {level} - reproject + clip + geojson NUTS")
+                            gdf_nuts = gpd.read_file(f"tmp/{year}_{geo}_{scale}_{level}_NUTS_{type}.gpkg")
+                            gdf_nuts_reprojected = gdf_nuts.to_crs(epsg=int(crs))
+                            gdf_nuts_clipped = gpd.clip(gdf_nuts_reprojected, bbox_gdf)
+                            gdf_nuts_clipped.to_file(f"{outpath}{scale}_{level}_NUTS_{type}.geojson", driver="GeoJSON")
+
 
 
 
@@ -308,8 +311,7 @@ def topoGeojson():
                     "-i", outpath + level + ".json"])
 
                   if debug: print(year + " " + geo + " " + crs + " " + scale + " " + level + " - reduce geojson")
-                  nbDec = 0
-                  if crs=="4326": nbDec=3
+                  nbDec = 3 if crs == "4326" else 0
                   reduceGeoJSON.reduceGeoJSONFile(outpath + "nutsrg_" + level + ".json", nbDec)
                   reduceGeoJSON.reduceGeoJSONFile(outpath + "nutsbn_" + level + ".json", nbDec)
                   reduceGeoJSON.reduceGeoJSONFile(outpath + "cntrg.json", nbDec)
@@ -342,64 +344,67 @@ def topoGeojson():
 
 # Produce point representations
 def points():
-   print("points")
+    print("points")
 
-   # prepare
-   for year in nutsData["years"]:
+    # Prepare points data
+    for year in nutsData["years"]:
+        Path(f"tmp/pts/{year}/").mkdir(parents=True, exist_ok=True)
 
-      Path("tmp/pts/" + year + "/").mkdir(parents=True, exist_ok=True)
+        # Load NUTS_LB data as GeoDataFrame
+        if debug: print(f"{year} PTS join areas")
+        gdf_lb = gpd.read_file(f"download/NUTS_LB_{year}_4326.gpkg")
 
-      if debug: print(year + " PTS join areas")
-      ogr2ogr.main(["-overwrite","-f", "GeoJSON",
-        "tmp/pts/" + year + "/NUTS_LB_.gpkg",
-        "-nln", "lay",
-        "download/NUTS_LB_" + year + "_4326.geojson",
-        "-sql", "select LB.NUTS_ID as id, LB.LEVL_CODE as lvl, A.area as ar FROM NUTS_LB_" + year + "_4326 AS LB left join 'src/resources/nuts_areas/AREA_" + year + ".csv'.AREA_" + year + " AS A ON LB.NUTS_ID = A.nuts_id"
-        ])
+        # Load area data from CSV and join with GeoDataFrame
+        area_df = pd.read_csv(f"src/resources/nuts_areas/AREA_{year}.csv")
+        gdf_lb = gdf_lb.merge(area_df, left_on="NUTS_ID", right_on="nuts_id", how="left")
 
-      if debug: print(year + " PTS join latn names")
-      ogr2ogr.main(["-overwrite","-f", "GPKG",
-        "tmp/pts/" + year + "/NUTS_LB.gpkg",
-        "-nln", "lay",
-        "tmp/pts/" + year + "/NUTS_LB_.gpkg",
-        "-sql", "select LB.id as id, LB.lvl as lvl, A.NAME_LATN as na, LB.ar as ar FROM lay AS LB left join 'download/NUTS_AT_" + year + ".csv'.NUTS_AT_" + year + " as A on LB.id = A.NUTS_ID"
-        ])
+        #if debug: print(f"{year} PTS join latn names")
+        # Load name data and join
+        #nuts_at_df = pd.read_csv(f"download/NUTS_AT_{year}.csv")
+        #gdf_lb = gdf_lb.merge(nuts_at_df, left_on="NUTS_ID", right_on="NUTS_ID", how="left")
 
-      for level in ["0", "1", "2", "3"]:
+        gdf_lb = gdf_lb[['geometry', 'NUTS_ID', 'LEVL_CODE', 'NAME_LATN', 'area']].rename(columns={'NUTS_ID': 'id', 'NAME_LATN': 'na', 'area': 'ar'})
 
-         if debug: print(year + " " + level + " - PTS decompose by NUTS level")
-         ogr2ogr.main(["-overwrite","-f", "GPKG",
-           "tmp/pts/" + year + "/NUTS_LB_" + level + ".gpkg",
-           "-nln", "lay",
-           "tmp/pts/" + year + "/NUTS_LB.gpkg",
-           "-sql", "SELECT geom,id,na,ar FROM lay AS LB WHERE lvl=" + level
-           ])
+        # Save the resulting GeoDataFrame to a temporary file
+        gdf_lb.to_file(f"tmp/pts/{year}/NUTS_LB.gpkg", driver="GPKG")
 
-   for year in nutsData["years"]:
-      for geo in geos:
-         for crs in geos[geo]["crs"]:
-            extends = geos[geo]["crs"][crs]
+        # Decompose by NUTS level and save
+        for level in ["0", "1", "2", "3"]:
+            if debug: print(f"{year} {level} - PTS decompose by NUTS level")
+            gdf_level = gdf_lb[gdf_lb["LEVL_CODE"] == int(level)]
+            gdf_level[["geometry", "id", "na", "ar"]].to_file(f"tmp/pts/{year}/NUTS_LB_{level}.gpkg", driver="GPKG")
 
-            outpath = "pub/" + version + "/" + year + "/" + ("" if geo=="EUR" else geo + "/") + crs + "/"
-            Path(outpath).mkdir(parents=True, exist_ok=True)
+    # Reproject and clip
+    for year in nutsData["years"]:
+        for geo in geos:
+            for crs in geos[geo]["crs"]:
+                extends = geos[geo]["crs"][crs]
 
-            for level in ["0", "1", "2", "3"]:
+                # Create output path
+                outpath = f"pub/{version}/{year}/{'' if geo == 'EUR' else geo + '/'}{crs}/"
+                Path(outpath).mkdir(parents=True, exist_ok=True)
 
-               if debug: print(year + " " + geo + " " + crs + " " + level + " - reproject PTS")
-               ogr2ogr.main(["-overwrite","-f","GeoJSON",
-                 outpath + "nutspt_" + level + ".json",
-                 "tmp/pts/" + year + "/NUTS_LB_" + level + ".gpkg",
-                 "-nln", "nutspt_" + level,
-                 "-a_srs" if(crs=="4326") else "-t_srs", "EPSG:"+crs,
-                 "-clipdst", str(extends["xmin"]), str(extends["ymin"]), str(extends["xmax"]), str(extends["ymax"])
-                 ])
+                # Define clipping box
+                bbox = box(extends["xmin"], extends["ymin"], extends["xmax"], extends["ymax"])
+                bbox_gdf = gpd.GeoDataFrame({"geometry": [bbox]}, crs="EPSG:" + crs)
 
-               if debug: print(year + " " + geo + " " + crs + " " + level + " - reduce PTS")
-               nbDec = 0
-               if crs=="4326": nbDec=3
-               reduceGeoJSON.reduceGeoJSONFile(outpath + "nutspt_" + level + ".json", nbDec)
+                for level in ["0", "1", "2", "3"]:
+                    if debug: print(f"{year} {geo} {crs} {level} - reproject PTS")
+                    gdf_pts = gpd.read_file(f"tmp/pts/{year}/NUTS_LB_{level}.gpkg")
 
+                    # Reproject the GeoDataFrame
+                    gdf_pts_reprojected = gdf_pts.to_crs(epsg=int(crs))
 
+                    # Clip the GeoDataFrame to the bounding box
+                    gdf_pts_clipped = gpd.clip(gdf_pts_reprojected, bbox_gdf)
+
+                    # Save the clipped data as GeoJSON
+                    gdf_pts_clipped.to_file(f"{outpath}nutspt_{level}.json", driver="GeoJSON")
+
+                    # Reduce precision if necessary
+                    if debug: print(f"{year} {geo} {crs} {level} - reduce PTS")
+                    nbDec = 3 if crs == "4326" else 0
+                    reduceGeoJSON.reduceGeoJSONFile(f"{outpath}nutspt_{level}.json", nbDec)
 
 
 
@@ -423,15 +428,15 @@ with open("pub/" + version + "/data.json", "w") as fp:
     json.dump(geos, fp, indent=3)
 
 # 1
-#download()
+download()
 # 2
-#filterRenameDecomposeClean()
+filterRenameDecomposeClean()
 # 3
 coarseClipping()
 # 4
-#reprojectClipGeojson()
+reprojectClipGeojson()
 # 5
-#topoGeojson()
+topoGeojson()
 # 6
-#points()
+points()
 ##############################
