@@ -1,5 +1,5 @@
 from pathlib import Path
-import subprocess, json, reduceGeoJSON #, urllib.request
+import subprocess, json, reduceGeoJSON, urllib.request
 import requests
 import geopandas as gpd
 import pandas as pd
@@ -25,30 +25,35 @@ debug = True
 # The Nuts2json version number
 version = "v2"
 
+#the download URL
+baseURL = "https://gisco-services.ec.europa.eu/distribution/v2/"
+
 
 # save data from url to file
 def download_from_url(url, outfile, timeout=50):
    if Path(outfile).exists(): return
    if debug: print(url)
 
+   '''
    url = url + "?_=" + str(int(time.time()))
    response = requests.get(url, headers={'Cache-Control': 'no-cache', 'Pragma': 'no-cache'})
    with open(outfile, "wb") as file:
        file.write(response.content)
+
    '''
+
    try:
       # Open the URL with a specified timeout
       with urllib.request.urlopen(url, timeout=timeout) as response:
          with open(outfile, 'wb') as out_file:
             out_file.write(response.read())
-            print("Done !")
+            #print("Done !")
    except urllib.error.HTTPError as e:
       print(f"HTTP Error: {e.code} - {e.reason}")
    except urllib.error.URLError as e:
       print(f"URL Error: {e.reason}")
    except Exception as e:
       print(f"An error occurred: {e}")
-    '''
 
 
 
@@ -56,7 +61,6 @@ def download_from_url(url, outfile, timeout=50):
 def download(timeout=30000):
    print("Download")
    Path("download/").mkdir(parents=True, exist_ok=True)
-   baseURL = "https://gisco-services.ec.europa.eu/distribution/v2/"
 
    for year in nutsData["years"]:
 
@@ -84,6 +88,8 @@ def download(timeout=30000):
             file = "CNTR_"+type+"_"+scale+"_"+year+"_4326.gpkg"
             year_ = ("2020" if year=="2021" else year)
             download_from_url(baseURL + "countries/gpkg/CNTR_"+type+"_"+scale+"_"+year_+"_4326.gpkg", "download/"+file, timeout)
+
+
 
 
 
@@ -241,13 +247,13 @@ def reprojectClipGeojson(doCleaning=True):
                         if debug: print(f"{year} {geo} {crs} {scale} {type} - reproject CNTR")
                         gdf_cntr = gpd.read_file(f"tmp/{year}_{geo}_{scale}_CNTR_{type}.gpkg")
                         gdf_cntr_reprojected = gdf_cntr.to_crs(epsg=int(crs))
-                        gdf_cntr_reprojected.to_file(f"{outpath}{scale}_CNTR_{type}_reproject.gpkg", driver="GPKG")
+                        #gdf_cntr_reprojected.to_file(f"{outpath}{scale}_CNTR_{type}_reproject.gpkg", driver="GPKG")
 
                         # Optionally clean with buffer(0) for RG type
                         if doCleaning and type == "RG":
                             if debug: print(f"{year} {geo} {crs} {scale} {type} - clean CNTR")
                             gdf_cntr_reprojected['geometry'] = gdf_cntr_reprojected.buffer(0)
-                            gdf_cntr_reprojected.to_file(f"{outpath}{scale}_CNTR_{type}_reproject.gpkg", driver="GPKG")
+                            #gdf_cntr_reprojected.to_file(f"{outpath}{scale}_CNTR_{type}_reproject.gpkg", driver="GPKG")
 
                         # Clip and save as GeoJSON
                         if debug: print(f"{year} {geo} {crs} {scale} {type} - clip + geojson CNTR")
@@ -262,7 +268,11 @@ def reprojectClipGeojson(doCleaning=True):
                             gdf_nuts_clipped = gpd.clip(gdf_nuts_reprojected, bbox_gdf)
                             gdf_nuts_clipped.to_file(f"{outpath}{scale}_{level}_NUTS_{type}.geojson", driver="GeoJSON")
 
-
+                            #ensure id is string
+                            file = f"{outpath}{scale}_{level}_NUTS_{type}.geojson"
+                            a = gpd.read_file(file)
+                            if len(a)>0: a['id'] = a['id'].astype(str)
+                            a.to_file(file, driver='GeoJSON')
 
 
 
@@ -294,12 +304,12 @@ def topoGeojson():
                     "cntrg=" + inpath + scale + "_CNTR_RG.geojson",
                     "cntbn=" + inpath + scale + "_CNTR_BN.geojson",
                     "gra=" + inpath + "graticule.geojson",
-                    "-o", inpath + level + ".json"])
+                    "-o", inpath + scale + "_" + level + ".json"])
 
                   if debug: print(year + " " + geo + " " + crs + " " + scale + " " + level + " - simplify topojson")
                   subprocess.run(["toposimplify", "-f", "-P", "0.99", "-o",
                     outpath + level + ".json",
-                    inpath + level + ".json"])
+                    inpath + scale + "_" + level + ".json"])
 
                   if debug: print(year + " " + geo + " " + crs + " " + scale + " " + level + " - topojson to geojson")
                   subprocess.run(["topo2geo",
@@ -428,6 +438,7 @@ with open("pub/" + version + "/data.json", "w") as fp:
     json.dump(geos, fp, indent=3)
 
 # 1
+#while True: download()
 download()
 #exit()
 # 2
@@ -441,3 +452,4 @@ topoGeojson()
 # 6
 points()
 ##############################
+
